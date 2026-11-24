@@ -1084,9 +1084,9 @@ void player_hud::update(const Fmatrix& cam_trans)
 
         CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
         const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
-        const bool is3dssOptic = wpn && wpn->Is3dssEnabled();
+        const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
 
-        if (is3dssOptic && zoomBlend >= 0.999f)
+        if (isStrictOptic && zoomBlend >= 0.999f)
         {
             s_visYawOff = 0.f;
             s_visPitchOff = 0.f;
@@ -1252,18 +1252,11 @@ void player_hud::update(const Fmatrix& cam_trans)
         CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
         const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
 
-        // Compensa a diferença entre hud_fov (~42°) e world_fov (~65°) durante ADS para alinhar alça, massa e ponto de impacto 1:1
-        float hudFovDeg = (wpn && wpn->GetLastHudFov() > 1.0f) ? wpn->GetLastHudFov() : (psHUD_FOV * 67.5f);
-        if (hudFovDeg < 15.0f || hudFovDeg > 120.0f)
-            hudFovDeg = 45.0f;
-        const float worldFovDeg = std::clamp(Device.fFOV, 20.0f, 120.0f);
-        const float fovRatio = tanf(deg2rad(hudFovDeg) * 0.5f) / std::max(tanf(deg2rad(worldFovDeg) * 0.5f), 0.001f);
-        const float visualAngleScale = 1.0f + (fovRatio - 1.0f) * zoomBlend;
+        const float yawOff = s_visYawOff;
+        const float pitchOff = s_visPitchOff;
 
-        const float yawOff = atanf(tanf(s_visYawOff) * visualAngleScale);
-        const float pitchOff = atanf(tanf(s_visPitchOff) * visualAngleScale);
-
-        const float adsPivotZ = std::clamp(g_freeaim_ads_pivot_z, 0.0f, 0.22f);
+        extern int g_freeaim_ads_align_cam;
+        const float adsPivotZ = (g_freeaim_ads_align_cam != 0) ? std::clamp(g_freeaim_ads_pivot_z, 0.0f, 0.22f) : 0.0f;
         const Fvector hipPivot{0.08f, -0.11f, -0.14f};
         const Fvector adsPivot{0.00f, g_freeaim_ads_pivot_y, adsPivotZ};
         Fvector activePivot;

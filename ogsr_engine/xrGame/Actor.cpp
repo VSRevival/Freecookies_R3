@@ -1922,8 +1922,8 @@ void CActor::UpdateFreeAimDeadzone(float dt)
     CCameraFirstEye* firstEye = (cam_active == eacFirstEye) ? smart_cast<CCameraFirstEye*>(cam_FirstEye()) : nullptr;
 
     const float zoomFactor = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.0f, 1.0f) : 0.0f;
-    const bool is3dssOptic = wpn && wpn->Is3dssEnabled();
-    const bool opticLocked = is3dssOptic && (zoomFactor >= 0.999f);
+    const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
+    const bool opticLocked = isStrictOptic && (zoomFactor >= 0.999f);
 
     const bool active =
         wpn && wpn->IsFreeAimAllowed() && !opticLocked && (cam_active == eacFirstEye) && (cam_freelook == eflDisabled) && !(mstate_real & mcSprint) && !WeaponLowered();
@@ -1973,7 +1973,7 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
         else
         {
-            const bool strictOpticAim = wpn && wpn->IsZoomed() && is3dssOptic;
+            const bool strictOpticAim = wpn && wpn->IsZoomed() && isStrictOptic;
             const float recenterSpeed = strictOpticAim ? 18.0f : 10.0f;
             const float alpha = std::clamp(1.f - expf(-recenterSpeed * safeDt), 0.f, 1.f);
 
@@ -2031,15 +2031,15 @@ void CActor::UpdateFreeAimDeadzone(float dt)
 
     const Fvector2 hipMaxAngles = wpn->GetFreeAimMaxAngles();
     Fvector2 maxAngles = hipMaxAngles;
-    if (is3dssOptic && zoomFactor > 0.f)
+    if (isStrictOptic && zoomFactor > 0.f)
     {
-        // Smoothly collapse the free-aim pocket to zero as the eye enters the 3DSS scope
-        const float taper = std::max(1.0f - zoomFactor, 0.001f);
+        // Smoothly collapse the free-aim pocket to zero as the eye enters the 3DSS/texture scope
+        const float taper = std::max(1.0f - zoomFactor, 0.0f);
         maxAngles.mul(taper);
     }
 
-    // Soft boundary clamp when hip-firing or inside ADS pocket; in Mode 1, transfer excess hipfire angle into the camera on ADS entry
-    if (!wpn->IsZoomed() || (g_freeaim_ads_align_cam == 0 && !is3dssOptic))
+    // Soft boundary clamp when hip-firing or in loose bodycam ADS mode (g_freeaim_ads_align_cam == 0)
+    if (!wpn->IsZoomed() || (g_freeaim_ads_align_cam == 0 && !isStrictOptic) || (g_freeaim_ads_center <= 0.f && g_freeaim_ads_align_cam == 0))
     {
         const float boundAlpha = std::clamp(1.f - expf(-14.0f * safeDt), 0.f, 1.f);
 
@@ -2055,15 +2055,15 @@ void CActor::UpdateFreeAimDeadzone(float dt)
     }
 
     // ADS alignment:
-    // - 3DSS scopes: always center into the PiP lens
-    // - Mode 1 (g_freeaim_ads_align_cam != 0): allow barrel/collimator to lead mouse movement; smoothly align camera when mouse settles
-    // - Mode 0 (g_freeaim_ads_align_cam == 0): keep loose ADS angle within eyebox without auto-centering
+    // - Strict optics (3DSS / 2D scope): always center into the lens
+    // - g_freeaim_ads_align_cam == 1: turn camera onto the barrel's world aim point
+    // - g_freeaim_ads_align_cam == 0: hold hipfire angle in viewport while rear sight aligns to eye
     if (wpn->IsZoomed() && safeDt > 0.f)
     {
         const float prevYaw = m_fAimYawOffset;
         const float prevPitch = m_fAimPitchOffset;
 
-        if (is3dssOptic)
+        if (isStrictOptic)
         {
             m_fAimLatchedCenterSpeed = 0.f;
             const float centerAlpha = std::clamp(1.f - expf(-18.0f * safeDt), 0.f, 1.f);
@@ -2082,28 +2082,9 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
         else if (g_freeaim_ads_align_cam != 0)
         {
-            const bool activelyLeading = (_abs(m_fAimSwingActivity) > 0.03f);
             const float effectiveCenterSpeed = (g_freeaim_ads_center > 0.f) ? g_freeaim_ads_center : 14.0f;
-
-            if (activelyLeading)
+            if (!fis_zero(m_fAimYawOffset) || !fis_zero(m_fAimPitchOffset))
             {
-                // Enquanto o mouse está em movimento, apenas absorve excesso fora do pocket de ADS para que o colimador lidere o movimento
-                m_fAimLatchedCenterSpeed = 0.f;
-                const float clampAlpha = std::clamp(1.f - expf(-18.0f * safeDt), 0.f, 1.f);
-
-                if (m_fAimYawOffset > maxAngles.x)
-                    m_fAimYawOffset += (maxAngles.x - m_fAimYawOffset) * clampAlpha;
-                else if (m_fAimYawOffset < -maxAngles.x)
-                    m_fAimYawOffset += (-maxAngles.x - m_fAimYawOffset) * clampAlpha;
-
-                if (m_fAimPitchOffset > maxAngles.y)
-                    m_fAimPitchOffset += (maxAngles.y - m_fAimPitchOffset) * clampAlpha;
-                else if (m_fAimPitchOffset < -maxAngles.y)
-                    m_fAimPitchOffset += (-maxAngles.y - m_fAimPitchOffset) * clampAlpha;
-            }
-            else if (!fis_zero(m_fAimYawOffset) || !fis_zero(m_fAimPitchOffset))
-            {
-                // Quando o mouse estabiliza no alvo, a câmera acompanha suavemente atrás da mira
                 if (m_fAimLatchedCenterSpeed <= 0.f)
                 {
                     const float refX = std::max(hipMaxAngles.x, 0.001f);
@@ -2151,7 +2132,7 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
         else
         {
-            // Loose bodycam mode (g_freeaim_ads_align_cam == 0): preserve ADS angle inside eyebox without recentering
+            // Loose bodycam mode (g_freeaim_ads_align_cam == 0): preserve hipfire offset without recentering
             m_fAimLatchedCenterSpeed = 0.f;
         }
 
@@ -2193,8 +2174,8 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
     }
 
-   // Continuous multi-zone edge acceleration when holding aim near the outer deadzone boundary
-    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    // Continuous multi-zone edge acceleration when holding aim near the outer deadzone boundary
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!isStrictOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
     {
         const float normYaw = m_fAimYawOffset / maxAngles.x;
         const float normPitch = m_fAimPitchOffset / maxAngles.y;
