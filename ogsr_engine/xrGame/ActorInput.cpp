@@ -473,8 +473,8 @@ float g_freeaim_shot_kick = 0.35f;
 float g_freeaim_ads_center = 7.5f;
 float g_freeaim_inertia = 1.35f;
 float g_freeaim_ads_pivot_y = 0.00f;
-float g_freeaim_ads_pivot_z = 0.0f;
-float g_freeaim_ads_roll = 0.35f;
+float g_freeaim_ads_pivot_z = 0.00f;
+float g_freeaim_ads_roll = 0.00f;
 
 namespace
 {
@@ -545,8 +545,8 @@ void CActor::IR_OnMouseMove(int dx, int dy)
 
     CWeapon* wpn = smart_cast<CWeapon*>(iitem);
     const float zoomFactor = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.0f, 1.0f) : 0.0f;
-    const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
-    const bool opticLocked = isStrictOptic && (zoomFactor >= 1.0f);
+    const bool is3dssOptic = wpn && wpn->Is3dssEnabled();
+    const bool opticLocked = is3dssOptic && (zoomFactor >= 1.0f);
 
     const bool allowDeadzone =
         wpn && wpn->IsFreeAimAllowed() && !opticLocked && (cam_active == eacFirstEye) && (cam_freelook == eflDisabled) && !(mstate_real & mcSprint) && !WeaponLowered();
@@ -557,7 +557,7 @@ void CActor::IR_OnMouseMove(int dx, int dy)
             m_fAimLatchedCenterSpeed = 0.f;
 
         Fvector2 maxAngles = wpn->GetFreeAimMaxAngles();
-        if (isStrictOptic && zoomFactor > 0.f)
+        if (is3dssOptic && zoomFactor > 0.f)
         {
             const float taper = std::max(1.0f - zoomFactor, 0.001f);
             maxAngles.mul(taper);
@@ -566,8 +566,8 @@ void CActor::IR_OnMouseMove(int dx, int dy)
         const float maxPitch = maxAngles.y;
 
         float baseWeaponSens = wpn->GetFreeAimSensitivity();
-        if (wpn->IsZoomed() && !isStrictOptic && g_freeaim_ads_align_cam != 0)
-            baseWeaponSens = std::max(baseWeaponSens, 0.90f);
+        if (wpn->IsZoomed() && !is3dssOptic)
+            baseWeaponSens = std::max(baseWeaponSens, 0.85f);
 
         const float normYaw = m_fAimYawOffset / maxYaw;
         const float normPitch = m_fAimPitchOffset / maxPitch;
@@ -630,7 +630,7 @@ void CActor::IR_OnMouseMove(int dx, int dy)
         const float signedSwing = (dYaw >= 0.f ? 1.f : -1.f) * _sqrt(dYaw * dYaw + dPitch * dPitch);
         m_fAimSwingActivity = std::clamp(m_fAimSwingActivity + signedSwing * 1.15f, -1.0f, 1.0f);
 
-        if (g_freeaim_cam_smooth > 0.01f && !(wpn->IsZoomed() && isStrictOptic) && cam_active == eacFirstEye)
+        if (g_freeaim_cam_smooth > 0.01f && !(wpn->IsZoomed() && is3dssOptic) && cam_active == eacFirstEye)
         {
             m_fAimPendingCamYaw += camYaw;
             m_fAimPendingCamPitch += camPitch;

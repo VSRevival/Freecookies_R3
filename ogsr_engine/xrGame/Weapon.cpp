@@ -8,6 +8,7 @@
 #include "entity_alive.h"
 #include "player_hud.h"
 #include "inventory_item_impl.h"
+#include "ui_base.h"
 
 #include "inventory.h"
 #include "xrserver_objects_alife_items.h"
@@ -1836,8 +1837,8 @@ bool CWeapon::IsFreeAimAllowed() const
     if (IsGrenadeMode())
         return false;
 
-    // Magnified 3D/2D optics lock to the eye once zoom completes; iron sights, reflex/holo sights, and alt/canted sights retain free-aim.
-    if (IsZoomed() && (m_fZoomRotationFactor >= 1.0f) && (const_cast<CWeapon*>(this)->Is3dssEnabled() || const_cast<CWeapon*>(this)->UseScopeTexture()))
+    // Only 3DSS PiP scopes lock to the center when fully zoomed in; 2D scopes, red dot sights, and iron sights retain free-aim.
+    if (IsZoomed() && (m_fZoomRotationFactor >= 1.0f) && const_cast<CWeapon*>(this)->Is3dssEnabled())
         return false;
 
     return true;
@@ -1846,11 +1847,18 @@ bool CWeapon::IsFreeAimAllowed() const
 Fvector2 CWeapon::GetFreeAimMaxAngles() const
 {
     extern int g_freeaim_ads_align_cam;
-    const bool isStrictOptic = const_cast<CWeapon*>(this)->Is3dssEnabled() || const_cast<CWeapon*>(this)->UseScopeTexture();
-    const float zoomBlend = (g_freeaim_ads_align_cam == 0 && !isStrictOptic) ? 0.f : std::clamp(m_fZoomRotationFactor, 0.f, 1.f);
+    const bool is3dssOptic = const_cast<CWeapon*>(this)->Is3dssEnabled();
+    const bool is2dScope = const_cast<CWeapon*>(this)->UseScopeTexture();
+    const float zoomBlend = std::clamp(m_fZoomRotationFactor, 0.f, 1.f);
 
-    float maxYawDeg = g_freeaim_hip_yaw + (g_freeaim_ads_yaw - g_freeaim_hip_yaw) * zoomBlend;
-    float maxPitchDeg = g_freeaim_hip_pitch + (g_freeaim_ads_pitch - g_freeaim_hip_pitch) * zoomBlend;
+    const float mode0Scale = (g_freeaim_ads_align_cam == 0 && !is3dssOptic && !is2dScope) ? 1.20f : 1.0f;
+    const float scope2dScale = is2dScope ? 0.38f : 1.0f;
+
+    const float targetAdsYaw = g_freeaim_ads_yaw * mode0Scale * scope2dScale;
+    const float targetAdsPitch = g_freeaim_ads_pitch * mode0Scale * scope2dScale;
+
+    float maxYawDeg = g_freeaim_hip_yaw + (targetAdsYaw - g_freeaim_hip_yaw) * zoomBlend;
+    float maxPitchDeg = g_freeaim_hip_pitch + (targetAdsPitch - g_freeaim_hip_pitch) * zoomBlend;
 
     // Tighten deadzone during reloads or HUD wall-collision retraction so the barrel tucks cleanly without clipping.
     if (GetState() == eReload || IsLowered())
@@ -1947,7 +1955,6 @@ void CWeapon::OnZoomIn()
 void CWeapon::OnZoomOut()
 {
     m_fZoomFactor = Core.Features.test(xrCore::Feature::ogse_wpn_zoom_system) ? 1.f : g_fov;
-
     if (m_bZoomMode)
     {
         SprintType = false;
@@ -2238,14 +2245,40 @@ void CWeapon::modify_holder_params(float& range, float& fov) const
     fov *= m_addon_holder_fov_modifier;
 }
 
+static float s_freeaim_scope_offset_x = 0.f;
+static float s_freeaim_scope_offset_y = 0.f;
+
+extern "C" __declspec(dllexport) void GetFreeAimScopeOffset(float& x, float& y)
+{
+    x = s_freeaim_scope_offset_x;
+    y = s_freeaim_scope_offset_y;
+}
+
 void CWeapon::OnDrawUI()
 {
     inherited::OnDrawUI();
+
+    s_freeaim_scope_offset_x = 0.f;
+    s_freeaim_scope_offset_y = 0.f;
 
     if (IsZoomed() && !IsRotatingToZoom())
     {
         if (UseScopeTexture() && m_UIScope)
         {
+            if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
+            {
+                const float fovDeg = std::clamp(pActor->GetCurrentFOV(), 5.0f, 120.0f);
+                const float tanHalfFovY = tanf(deg2rad(fovDeg) * 0.5f);
+                const float aspect = float(Device.dwWidth) / float(std::max(Device.dwHeight, 1u));
+                const float tanHalfFovX = tanHalfFovY * aspect;
+
+                const float uvX = (-tanf(pActor->m_fAimYawOffset) / std::max(tanHalfFovX, 0.001f)) * 0.5f;
+                const float uvY = (-tanf(pActor->m_fAimPitchOffset) / std::max(tanHalfFovY, 0.001f)) * 0.5f;
+
+                s_freeaim_scope_offset_x = std::clamp(uvX, -0.14f, 0.14f);
+                s_freeaim_scope_offset_y = std::clamp(uvY, -0.14f, 0.14f);
+            }
+
             m_UIScope->Update();
             m_UIScope->Draw();
         }
