@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="windows-1251" ?>
+<string_table>
+	<string id="kb_night_vision_rad">
+		<text> </text>
+	</string>
+	<string id="kb_quick_nade">
+		<text> </text>
+	</string>
+	<string id="kb_use_radio">
+		<text> </text>
+	</string>
+	<string id="kb_free_zoom">
+		<text> </text>
+	</string>
+	<string id="kb_wpn_bore">
+		<text> </text>
+	</string>
+	<string id="kb_wpn_lower">
+		<text>&#x041E;&#x043F;&#x0443;&#x0441;&#x0442;&#x0438;&#x0442;&#x044C; &#x043E;&#x0440;&#x0443;&#x0436;&#x0438;&#x0435;</text>
+	</string>
+	<string id="kb_wpn_zoom_alter">
+		<text> </text>
+	</string>
+	<string id="kb_wpn_zoom_inc">
+		<text> </text>
+	</string>
+	<string id="kb_wpn_zoom_dec">
+		<text> </text>
+	</string>
+	<string id="st_mouse_wheel_up">
+		<text> </text>
+	</string>
+	<string id="st_mouse_wheel_down">
+		<text> </text>
+	</string>
+	<string id="kb_laser_on">
+		<text></text>
+	</string>
+	<string id="kb_name_save">
+		<text> </text>
+	</string>
+	<string id="kb_torch_rad">
+		<text> (   )</text>
+	</string>
+	<string id="kb_use_swipe">
+		<text> </text>
+	</string>
+	<string id="kb_na_use_detector">
+		<text> </text>
+	</string>
+	<string id="kb_na_use_binoc">
+		<text> </text>
+	</string>
+	<string id="kb_active_jobs">
+		<text>   </text>
+	</string>
+	<string id="kb_always_run">
+		<text></text>
+	</string>
+	<string id="kb_artefact">
+		<text></text>
+	</string>
+	<string id="kb_backward">
+		<text></text>
+	</string>
+	<string id="kb_binoculars">
+		<text></text>
+	</string>
+	<string id="kb_buy_menu">
+		<text> </text>
+	</string>
+	<string id="kb_chat">
+		<text></text>
+	</string>
+	<string id="kb_chat_team">
+		<text> </text>
+	</string>
+	<string id="kb_console">
+		<text></text>
+	</string>
+	<string id="kb_contacts">
+		<text>  </text>
+	</string>
+	<string id="kb_crouch">
+		<text></text>
+	</string>
+	<string id="kb_crouch_toggle">
+		<text>  </text>
+	</string>
+	<string id="kb_walk_toggle">
+		<text>Шаг</text>
+	</string>
+	<string id="kb_crouch_low_toggle">
+		<text>Низкий присед</text>
+	</string>
+	<string id="kb_down">
+		<text></text>
+	</string>
+	<string id="kb_drop">
+		<text></text>
+	</string>
+	<string id="kb_fire">
+		<text></text>
+	</string>
+	<string id="kb_firemode_next">
+		<text>   </text>
+	</string>
+	<string id="kb_firemode_prev">
+		<text>  </text>
+	</string>
+	<string id="kb_forward">
+		<text></text>
+	</string>
+	<string id="kb_func">
+		<text></text>
+	</string>
+	<string id="kb_grp_common">
+		<text></text>
+	</string>
+	<string id="kb_grp_direction">
+		<text></text>
+	</string>
+	<string id="kb_grp_inventory">
+		<text></text>
+	</string>
+	<string id="kb_grp_movement">
+		<text></text>
+	</string>
+	<string id="kb_grp_multiplayer">
+		<text> </text>
+	</string>
+	<string id="kb_grp_weapons">
+		<text></text>
+	</string>
+	<string id="kb_inventory">
+		<text></text>
+	</string>
+	<string id="kb_jump">
+		<text></text>
+	</string>
+	<string id="kb_left">
+		<text></text>
+	</string>
+	<string id="kb_left_lookout">
+		<text> </text>
+	</string>
+	<string id="kb_left_strafe">
+		<text> </text>
+	</string>
+	<string id="kb_map">
+		<text>  </text>
+	</string>
+	<string id="kb_next_slot">
+		<text>   </text>
+	</string>
+	<string id="kb_night_vision">
+		<text>  </text>
+	</string>
+	<string id="kb_pause">
+		<text></text>
+	</string>
+	<string id="kb_pda">
+		<text></text>
+	</string>
+	<string id="kb_prev_slot">
+		<text>   </text>
+	</string>
+	<string id="kb_quit">
+		<text></text>
+	</string>
+	<string id="kb_reload">
+		<text></text>
+	</string>
+	<string id="kb_repair">
+		<text></text>
+	</string>
+	<string id="kb_right">
+		<text></text>
+	</string>
+	<string id="kb_right_lookout">
+		<text> </text>
+	</string>
+	<string id="kb_right_strafe">
+		<text> </text>
+	</string>
+	<string id="kb_scores">
+		<text>  </text>
+	</string>
+	<string id="kb_screenshot">
+		<text></text>
+	</string>
+	<string id="kb_skin_menu">
+		<text>  </text>
+	</string>
+	<string id="kb_sprint">
+		<text></text>
+	</string>
+	<string id="kb_team_menu">
+		<text>  </text>
+	</string>
+	<string id="kb_torch">
+		<text> /</text>
+	</string>
+	<string id="kb_up">
+		<text></text>
+	</string>
+	<string id="kb_use">
+		<text></text>
+	</string>
+	<string id="kb_use_bandage">
+		<text> . </text>
+	</string>
+	<string id="kb_use_medkit">
+		<text> . </text>
+	</string>
+	<string id="kb_vote_begin">
+		<text> </text>
+	</string>
+	<string id="kb_vote_menu">
+		<text></text>
+	</string>
+	<string id="kb_vote_no">
+		<text> </text>
+	</string>
+	<string id="kb_vote_yes">
+		<text> </text>
+	</string>
+	<string id="kb_weapon1">
+		<text></text>
+	</string>
+	<string id="kb_weapon2">
+		<text> 1</text>
+	</string>
+	<string id="kb_weapon3">
+		<text> 2</text>
+	</string>
+	<string id="kb_weapon4">
+		<text></text>
+	</string>
+	<string id="kb_weapon5">
+		<text></text>
+	</string>
+	<string id="kb_weapon6">
+		<text></text>
+	</string>
+	<string id="kb_weapon13">
+		<text></text>
+	</string>
+	<string id="kb_wpn_next">
+		<text>  </text>
+	</string>
+	<string id="kb_wpn_prev">
+		<text>   </text>
+	</string>
+	<string id="kb_zoom">
+		<text></text>
+	</string>
+	<string id="speech_menu_group">
+		<text>  (1)</text>
+	</string>
+	<string id="speech_menu_personal">
+		<text>  (2)</text>
+	</string>
+	<string id="kb_turn_engine">
+		<text> </text>
+	</string>
+	<string id="kb_cam_1">
+		<text>  1- </text>
+	</string>
+	<string id="kb_cam_2">
+		<text>  3-  (. )</text>
+	</string>
+	<string id="kb_cam_3">
+		<text>  3-  (. )</text>
+	</string>
+	<string id="kb_freelook">
+		<text> </text>
+	</string>
+	<string id="kb_cycle_interact">
+		<text>  </text>
+	</string>
+	<string id="kb_quick_use">
+		<text>  </text>
+	</string>
+	<string id="ui_mm_unbind_hint">
+		<text> Esc,  </text>
+	</string>
+	<string id="kb_item_wheel">
+		<text> </text>
+	</string>
+</string_table>
