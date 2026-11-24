@@ -264,6 +264,27 @@ static class cl_fakescope_params1 final : public R_constant_setup
 {
     virtual void setup(CBackend& cmd_list, R_constant* C) { cmd_list.set_c(C, ps_scope1_params.x, ps_scope1_params.y, ps_scope1_params.z, ps_scope1_params.w); }
 } binder_fakescope_params1;
+
+static class cl_freeaim_scope_offset final : public R_constant_setup
+{
+    virtual void setup(CBackend& cmd_list, R_constant* C)
+    {
+        using FnGetOffset = void(__cdecl*)(float&, float&);
+        static FnGetOffset pGetOffset = nullptr;
+        if (!pGetOffset)
+        {
+            if (HMODULE hGame = GetModuleHandleA("xrGame.dll"))
+                pGetOffset = reinterpret_cast<FnGetOffset>(GetProcAddress(hGame, "GetFreeAimScopeOffset"));
+        }
+
+        float ox = 0.f, oy = 0.f;
+        if (pGetOffset)
+            pGetOffset(ox, oy);
+
+        cmd_list.set_c(C, ox, oy, 0.f, 0.f);
+    }
+} binder_freeaim_scope_offset;
+
 static class cl_fakescope_params2 final : public R_constant_setup
 {
     void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, ps_scope2_params.x, ps_scope2_params.y, ps_scope2_params.z, ps_scope2_params.w); }
@@ -881,6 +902,7 @@ void CBlender_Compile::SetMapping() const
 
     r_Constant("fakescope", &binder_fakescope);
     r_Constant("fakescope_params1", &binder_fakescope_params1);
+    r_Constant("freeaim_scope_offset", &binder_freeaim_scope_offset);
     r_Constant("fakescope_params2", &binder_fakescope_params2);
     r_Constant("fakescope_params3", &binder_fakescope_params3);
 

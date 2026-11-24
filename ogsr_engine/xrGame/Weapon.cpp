@@ -34,6 +34,14 @@
 #include "../xr_3da/x_ray.h"
 
 #define ROTATION_TIME 0.25f
+static float s_freeaim_scope_offset_x = 0.f;
+static float s_freeaim_scope_offset_y = 0.f;
+
+extern "C" __declspec(dllexport) void GetFreeAimScopeOffset(float& x, float& y)
+{
+    x = s_freeaim_scope_offset_x;
+    y = s_freeaim_scope_offset_y;
+}
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -1947,6 +1955,8 @@ void CWeapon::OnZoomIn()
 void CWeapon::OnZoomOut()
 {
     m_fZoomFactor = Core.Features.test(xrCore::Feature::ogse_wpn_zoom_system) ? 1.f : g_fov;
+    s_freeaim_scope_offset_x = 0.f;
+    s_freeaim_scope_offset_y = 0.f;
 
     if (m_bZoomMode)
     {
@@ -2242,10 +2252,27 @@ void CWeapon::OnDrawUI()
 {
     inherited::OnDrawUI();
 
+    s_freeaim_scope_offset_x = 0.f;
+    s_freeaim_scope_offset_y = 0.f;
+
     if (IsZoomed() && !IsRotatingToZoom())
     {
         if (UseScopeTexture() && m_UIScope)
         {
+            if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
+            {
+                const float fovDeg = std::clamp(Device.fFOV, 5.0f, 120.0f);
+                const float tanHalfFovY = tanf(deg2rad(fovDeg) * 0.5f);
+                const float aspect = float(Device.dwWidth) / float(std::max(Device.dwHeight, 1u));
+                const float tanHalfFovX = tanHalfFovY * aspect;
+
+                const float uvX = (-tanf(pActor->m_fAimYawOffset) / std::max(tanHalfFovX, 0.001f)) * 0.5f;
+                const float uvY = (-tanf(pActor->m_fAimPitchOffset) / std::max(tanHalfFovY, 0.001f)) * 0.5f;
+
+                s_freeaim_scope_offset_x = std::clamp(uvX, -0.14f, 0.14f);
+                s_freeaim_scope_offset_y = std::clamp(uvY, -0.14f, 0.14f);
+            }
+
             m_UIScope->Update();
             m_UIScope->Draw();
         }
