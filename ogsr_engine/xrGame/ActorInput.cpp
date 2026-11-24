@@ -464,7 +464,7 @@ float g_freeaim_ads_sens = 0.28f;
 float g_freeaim_roll = 0.22f;
 float g_freeaim_cam_roll = 0.12f;
 float g_freeaim_cam_smooth = 28.0f;
-float g_freeaim_z1_end = 0.25f;
+float g_freeaim_z1_end = 0.00f;
 float g_freeaim_z2_follow = 0.18f;
 float g_freeaim_z3_follow = 0.50f;
 float g_freeaim_z4_follow = 0.85f;
@@ -488,7 +488,7 @@ float SmoothStepRange(float edge0, float edge1, float x)
 
 float ComputeFreeAimZoneFollow(float radialRatio, bool movingOutward)
 {
-    const float z1 = std::clamp(g_freeaim_z1_end, 0.05f, 0.45f);
+    const float z1 = std::clamp(g_freeaim_z1_end, 0.00f, 0.45f);
     const float z2End = std::max(z1 + 0.15f, 0.55f);
     const float z3End = std::max(z2End + 0.15f, 0.82f);
 

@@ -1729,7 +1729,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "g_freeaim_roll", &g_freeaim_roll, 0.0f, 1.0f);
     CMD4(CCC_Float, "g_freeaim_cam_roll", &g_freeaim_cam_roll, 0.0f, 0.60f);
     CMD4(CCC_Float, "g_freeaim_cam_smooth", &g_freeaim_cam_smooth, 5.0f, 60.0f);
-    CMD4(CCC_Float, "g_freeaim_z1_end", &g_freeaim_z1_end, 0.05f, 0.45f);
+    CMD4(CCC_Float, "g_freeaim_z1_end", &g_freeaim_z1_end, 0.00f, 0.45f);
     CMD4(CCC_Float, "g_freeaim_z2_follow", &g_freeaim_z2_follow, 0.0f, 1.0f);
     CMD4(CCC_Float, "g_freeaim_z3_follow", &g_freeaim_z3_follow, 0.0f, 1.0f);
     CMD4(CCC_Float, "g_freeaim_z4_follow", &g_freeaim_z4_follow, 0.0f, 1.0f);

@@ -1931,7 +1931,8 @@ void CActor::UpdateFreeAimDeadzone(float dt)
 
     if (safeDt > 0.f)
     {
-        m_fAimSwingActivity *= expf(-9.5f * safeDt);
+        // Teto baixo + decaimento rápido: mantém continuidade entre polls do mouse, mas libera a centralização imediatamente ao parar
+        m_fAimSwingActivity = std::min(m_fAimSwingActivity, 0.35f) * expf(-75.0f * safeDt);
         if (_abs(m_fAimSwingActivity) < 0.001f)
             m_fAimSwingActivity = 0.f;
     }
@@ -2083,30 +2084,50 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         else if (g_freeaim_ads_align_cam != 0)
         {
             const float effectiveCenterSpeed = (g_freeaim_ads_center > 0.f) ? g_freeaim_ads_center : 14.0f;
-            if (!fis_zero(m_fAimYawOffset) || !fis_zero(m_fAimPitchOffset))
-            {
-                if (m_fAimLatchedCenterSpeed <= 0.f)
-                {
-                    const float refX = std::max(hipMaxAngles.x, 0.001f);
-                    const float refY = std::max(hipMaxAngles.y, 0.001f);
-                    const float normYaw = m_fAimYawOffset / refX;
-                    const float normPitch = m_fAimPitchOffset / refY;
-                    const float startRadial = std::clamp(_sqrt(normYaw * normYaw + normPitch * normPitch), 0.f, 1.f);
+            m_fAimLatchedCenterSpeed = 0.f;
 
-                    const float t = std::clamp(startRadial / 0.65f, 0.f, 1.f);
-                    const float speedMult = 0.14f + 0.86f * (t * t);
-                    m_fAimLatchedCenterSpeed = effectiveCenterSpeed * speedMult;
-                }
+            if (activelyLeading)
+            {
+                // Enquanto o mouse está em movimento, apenas absorve excesso fora do pocket de ADS para que o colimador lidere o movimento
+                const float clampAlpha = std::clamp(1.f - expf(-18.0f * safeDt), 0.f, 1.f);
+
+                if (m_fAimYawOffset > maxAngles.x)
+                    m_fAimYawOffset += (maxAngles.x - m_fAimYawOffset) * clampAlpha;
+                else if (m_fAimYawOffset < -maxAngles.x)
+                    m_fAimYawOffset += (-maxAngles.x - m_fAimYawOffset) * clampAlpha;
+
+                if (m_fAimPitchOffset > maxAngles.y)
+                    m_fAimPitchOffset += (maxAngles.y - m_fAimPitchOffset) * clampAlpha;
+                else if (m_fAimPitchOffset < -maxAngles.y)
+                    m_fAimPitchOffset += (-maxAngles.y - m_fAimPitchOffset) * clampAlpha;
+            }
+            else if (!fis_zero(m_fAimYawOffset) || !fis_zero(m_fAimPitchOffset))
+            {
+                // Centralização imediata com velocidade fixa (independente da posição na tela)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
                 const float dist = _sqrt(m_fAimYawOffset * m_fAimYawOffset + m_fAimPitchOffset * m_fAimPitchOffset);
-                const float angularRate = m_fAimLatchedCenterSpeed * 0.022f;
+                const float angularRate = (effectiveCenterSpeed * 1.25f) * 0.022f;
                 const float step = angularRate * safeDt;
 
                 if (dist <= step)
                 {
                     m_fAimYawOffset = 0.f;
                     m_fAimPitchOffset = 0.f;
-                    m_fAimLatchedCenterSpeed = 0.f;
                 }
                 else
                 {
@@ -2114,10 +2135,6 @@ void CActor::UpdateFreeAimDeadzone(float dt)
                     m_fAimYawOffset *= scale;
                     m_fAimPitchOffset *= scale;
                 }
-            }
-            else
-            {
-                m_fAimLatchedCenterSpeed = 0.f;
             }
 
             if (firstEye)
@@ -2158,24 +2175,24 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         const float targetRoll = -m_fAimYawOffset * (g_freeaim_roll * 0.45f) * adsCantScale;
 
         constexpr float omega = 11.5f;
-        constexpr float springK = omega * omega;
-        constexpr float dampingC = 2.0f * omega;
-
-        const float springAccel = (targetRoll - m_fAimRollOffset) * springK - m_fAimRollVel * dampingC;
-        m_fAimRollVel += springAccel * safeDt;
-
-        const float maxRoll = 0.22f * std::clamp(g_freeaim_roll, 0.f, 2.5f) * adsCantScale;
-        m_fAimRollOffset = std::clamp(m_fAimRollOffset + m_fAimRollVel * safeDt, -maxRoll, maxRoll);
-
-        if (_abs(m_fAimRollOffset) < 0.0001f && _abs(m_fAimRollVel) < 0.001f && fis_zero(targetRoll))
-        {
-            m_fAimRollOffset = 0.f;
-            m_fAimRollVel = 0.f;
-        }
-    }
-
     // Continuous multi-zone edge acceleration when holding aim near the outer deadzone boundary
-    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!isStrictOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+
+   // Continuous multi-zone edge acceleration when holding aim near the outer deadzone boundary
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
+    if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
     {
         const float normYaw = m_fAimYawOffset / maxAngles.x;
         const float normPitch = m_fAimPitchOffset / maxAngles.y;
