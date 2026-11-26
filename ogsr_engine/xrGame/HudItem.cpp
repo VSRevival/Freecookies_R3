@@ -23,6 +23,7 @@
 #include "ai_space.h"
 #include "script_engine.h"
 #include "script_game_object.h"
+#include <unordered_map>
 
 ENGINE_API extern float psHUD_FOV_def;
 
@@ -61,7 +62,66 @@ bool CallPlayHUDMotionScript(shared_str& motion, bool& mix_in, u32& state, float
         speed = ::luabind::object_cast<float>(spd);
 
     return true;
-}
+
+    struct AsymSpring3D
+    {
+        Fvector pos{0.f, 0.f, 0.f};
+        Fvector vel{0.f, 0.f, 0.f};
+
+        void Reset()
+        {
+            pos.set(0.f, 0.f, 0.f);
+            vel.set(0.f, 0.f, 0.f);
+        }
+
+        void Update(const Fvector& target, float dt, float omegaAccel, float zetaAccel, float omegaBrake, float zetaBrake)
+        {
+            Fvector err;
+            err.sub(target, pos);
+
+            const float dot = err.x * vel.x + err.y * vel.y + err.z * vel.z;
+            const bool isBraking = (dot < 0.f) || (target.magnitude() < 0.0005f && vel.magnitude() > 0.0005f);
+
+            const float omega = isBraking ? omegaBrake : omegaAccel;
+            const float zeta = isBraking ? zetaBrake : zetaAccel;
+
+            const float k = omega * omega;
+            const float c = 2.0f * zeta * omega;
+
+            Fvector accel;
+            accel.mul(err, k);
+            accel.mad(vel, -c);
+
+            vel.mad(accel, dt);
+            pos.mad(vel, dt);
+        }
+    };
+
+    struct MouseWeaponPhysics
+    {
+        bool initialized = false;
+        Fvector prevCamDir{0.f, 0.f, 1.f};
+        float prevYawVel = 0.f;
+        float prevPitchVel = 0.f;
+        Fvector prevArmVel{0.f, 0.f, 0.f};
+
+        AsymSpring3D armSpring; // Translação do braço/ombro em resposta ao mouse
+        AsymSpring3D wristSpring; // Curvatura do cano e compensação do pulso
+
+        void Reset(const Fvector& camDir)
+        {
+            initialized = true;
+            prevCamDir = camDir;
+            prevYawVel = 0.f;
+            prevPitchVel = 0.f;
+            prevArmVel.set(0.f, 0.f, 0.f);
+            armSpring.Reset();
+            wristSpring.Reset();
+        }
+    };
+
+    std::unordered_map<const CHudItem*, MouseWeaponPhysics> g_mouseWpnPhysics;
+} 
 
 void CallOnAnimationEndScript(CGameObject& go, LPCSTR section, LPCSTR motion, u32 state, u32 slot)
 {
@@ -239,7 +299,11 @@ void CHudItem::Load(LPCSTR section)
 
 void CHudItem::PlaySound(HUD_SOUND& hud_snd, const Fvector& position, bool overlap) { HUD_SOUND::PlaySound(hud_snd, position, object().H_Root(), !!GetHUDmode(), false, overlap); }
 
-void CHudItem::net_Destroy() { m_dwStateTime = 0; }
+void CHudItem::net_Destroy()
+{
+    m_dwStateTime = 0;
+  
+}
 
 BOOL CHudItem::net_Spawn(CSE_Abstract* DC) { return TRUE; }
 
@@ -422,6 +486,8 @@ void CHudItem::OnH_B_Chield()
     StopCurrentAnimWithoutCallback();
 
     m_nearwall_last_hud_fov = m_base_fov > 0.0f ? m_base_fov : psHUD_FOV_def;
+
+    
 }
 
 void CHudItem::OnH_B_Independent(bool just_before_destroy)
@@ -929,73 +995,289 @@ void CHudItem::UpdateCollision(Fmatrix& trans)
 
 void CHudItem::UpdateInertion(Fmatrix& trans)
 {
-    if (HudInertionEnabled() && HudInertionAllowed())
+    if (!HudInertionEnabled() || !HudInertionAllowed())
+        return;
+
+    extern int g_freeaim_enabled;
+    extern float g_freeaim_wpn_sway;
+    extern float g_freeaim_wpn_roll;
+    extern float g_freeaim_wpn_max_angle;
+    extern float g_freeaim_wpn_speed;
+    extern float g_freeaim_wpn_damping;
+    extern float g_freeaim_wpn_ads_mult;
+
+    if (g_freeaim_enabled)
     {
-        Fmatrix xform;
-        Fvector& origin = trans.c;
-        xform = trans;
-
-        // Track camera look direction rather than free-aim HUD offset so hip-to-ADS
-        // free-aim centering does not generate a false lateral inertia overshoot.
-        Fvector cur_dir = Device.vCameraDirection;
-        cur_dir.normalize_safe();
-
-        // calc difference
-        Fvector diff_dir;
-        diff_dir.sub(cur_dir, inert_st_last_dir);
-
-        // clamp by PI_DIV_2
-        Fvector last;
-        last.normalize_safe(inert_st_last_dir);
-        const float dot = last.dotproduct(cur_dir);
-        if (dot < EPS)
+        struct AsymSpring3D
         {
-            Fvector v0;
-            v0.crossproduct(inert_st_last_dir, cur_dir);
-            inert_st_last_dir.crossproduct(cur_dir, v0);
-            diff_dir.sub(cur_dir, inert_st_last_dir);
-        }
+            Fvector pos{0.f, 0.f, 0.f};
+            Fvector vel{0.f, 0.f, 0.f};
 
-       // tend to forward
-        float _tendto_speed, _origin_offset;
-        if (IsZoomed())
-        { // Худ в режиме "Прицеливание"
-            extern int g_freeaim_enabled;
-            float factor = GetInertionFactor();
-            _tendto_speed = inertion_data.m_tendto_speed_aim - (inertion_data.m_tendto_speed_aim - inertion_data.m_tendto_speed) * factor;
-            _origin_offset = inertion_data.m_origin_offset_aim - (inertion_data.m_origin_offset_aim - inertion_data.m_origin_offset) * factor;
-            if (g_freeaim_enabled)
-                _origin_offset *= factor;
-        }
-        else
-        { // Худ в режиме "От бедра"
-            _tendto_speed = inertion_data.m_tendto_speed;
-            _origin_offset = inertion_data.m_origin_offset;
-        }
+            void Reset()
+            {
+                pos.set(0.f, 0.f, 0.f);
+                vel.set(0.f, 0.f, 0.f);
+            }
 
-        // Фактор силы инерции
-        const float power_factor = GetInertionPowerFactor();
-        _tendto_speed *= power_factor;
-        _origin_offset *= power_factor;
+            void Update(const Fvector& target, float dt, float omegaAccel, float zetaAccel, float omegaBrake, float zetaBrake)
+            {
+                const int steps = std::max(1, iCeil(dt / 0.008f));
+                const float subDt = dt / static_cast<float>(steps);
 
-        inert_st_last_dir.mad(diff_dir, _tendto_speed * Device.fTimeDelta);
-        origin.mad(diff_dir, -_origin_offset); // Инвертировал
+                for (int i = 0; i < steps; ++i)
+                {
+                    Fvector err;
+                    err.sub(target, pos);
 
-        // pitch compensation
-        float pitch = angle_normalize_signed(cur_dir.getP());
+                    const float dot = err.x * vel.x + err.y * vel.y + err.z * vel.z;
+                    const bool isBraking = (dot < 0.f) || (target.magnitude() < 0.0005f && vel.magnitude() > 0.0005f);
 
-        pitch *= GetInertionFactor();
+                    const float omega = isBraking ? omegaBrake : omegaAccel;
+                    const float zeta = isBraking ? zetaBrake : zetaAccel;
 
-        // Отдаление\приближение
-        origin.mad(xform.k, -pitch * inertion_data.m_pitch_offset_d);
+                    const float k = omega * omega;
+                    const float c = 2.0f * zeta * omega;
 
-        // Сдвиг в противоположную часть экрана
-        origin.mad(xform.i, -pitch * inertion_data.m_pitch_offset_r);
+                    Fvector accel;
+                    accel.mul(err, k);
+                    accel.mad(vel, -c);
 
-        // Подьём\опускание
+                    vel.mad(accel, subDt);
+                    pos.mad(vel, subDt);
+                }
+            }
+        };
+
+        struct MouseWeaponPhysics
+        {
+            bool initialized = false;
+            u16 itemId = u16(-1);
+            float timeAccum = 0.f;
+            float holdEnergy = 0.f;
+            Fvector prevCamDir{0.f, 0.f, 1.f};
+            float prevYawVel = 0.f;
+            float prevPitchVel = 0.f;
+            Fvector prevArmVel{0.f, 0.f, 0.f};
+
+            AsymSpring3D armSpring;
+            AsymSpring3D wristSpring;
+
+            void Reset(const Fvector& camDir, u16 id)
+            {
+                initialized = true;
+                itemId = id;
+                timeAccum = 0.f;
+                holdEnergy = 0.f;
+                prevCamDir = camDir;
+                prevYawVel = 0.f;
+                prevPitchVel = 0.f;
+                prevArmVel.set(0.f, 0.f, 0.f);
+                armSpring.Reset();
+                wristSpring.Reset();
+            }
+        };
+
+        static xr_map<const CHudItem*, MouseWeaponPhysics> s_mouseWpnPhysics;
+
+        const float dt = Device.fTimeDelta;
+        if (dt <= EPS)
+            return;
+
+        float simDt = dt;
+        clamp(simDt, 0.0001f, 0.05f);
+
+        Fvector curDir = Device.vCameraDirection;
+        curDir.normalize_safe();
+
+        const u16 currentId = object().ID();
+        auto& phys = s_mouseWpnPhysics[this];
+        if (!phys.initialized || phys.itemId != currentId || dt > 0.25f)
+            phys.Reset(curDir, currentId);
+
+        phys.timeAccum += simDt;
+
+        // 1. Mouse velocity & non-linear sweep curve
+        Fvector diffDir;
+        diffDir.sub(curDir, phys.prevCamDir);
+        phys.prevCamDir = curDir;
+
+        float yawVel = diffDir.dotproduct(trans.i) / simDt;
+        float pitchVel = diffDir.dotproduct(trans.j) / simDt;
+        clamp(yawVel, -14.f, 14.f);
+        clamp(pitchVel, -14.f, 14.f);
+
+        const float nlYawVel = yawVel * (1.0f + 0.16f * _abs(yawVel));
+        const float nlPitchVel = pitchVel * (1.0f + 0.14f * _abs(pitchVel));
+
+        float yawAccel = (yawVel - phys.prevYawVel) / simDt;
+        float pitchAccel = (pitchVel - phys.prevPitchVel) / simDt;
+        clamp(yawAccel, -150.f, 150.f);
+        clamp(pitchAccel, -150.f, 150.f);
+
+        const bool yawReversal = (yawVel * phys.prevYawVel) < -0.25f;
+        const bool pitchReversal = (pitchVel * phys.prevPitchVel) < -0.25f;
+        phys.prevYawVel = yawVel;
+        phys.prevPitchVel = pitchVel;
+
+        const float turnActivity = _sqrt(yawVel * yawVel + pitchVel * pitchVel);
+        phys.holdEnergy = phys.holdEnergy * (1.0f - 2.5f * simDt) + turnActivity * 0.35f * simDt;
+        clamp(phys.holdEnergy, 0.f, 1.f);
+
+        CWeapon* wpn = smart_cast<CWeapon*>(this);
+        float zoomBlend = wpn ? wpn->GetZRotatingFactor() : (IsZoomed() ? 1.0f : 0.0f);
+        clamp(zoomBlend, 0.f, 1.f);
+        const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
+
+        const float power = GetInertionPowerFactor();
+        const float adsMult = 1.0f + (g_freeaim_wpn_ads_mult - 1.0f) * zoomBlend;
+        const float posScale = (1.0f - (isStrictOptic ? 0.88f : 0.65f) * zoomBlend) * power * g_freeaim_wpn_sway * adsMult;
+        const float rotScale = (1.0f - (isStrictOptic ? 0.80f : 0.50f) * zoomBlend) * power * g_freeaim_wpn_sway * adsMult;
+
+        // 2. Heavy ARM spring
+        const float arcDipY = -_abs(nlYawVel) * 0.0042f - nlPitchVel * 0.0025f;
+        const float arcTuckZ = -_abs(nlYawVel) * 0.0065f - _abs(nlPitchVel) * 0.0038f;
+
+        Fvector armTarget;
+        armTarget.x = (-nlYawVel * 0.022f - yawAccel * 0.00055f) * posScale;
+        armTarget.y = (-nlPitchVel * 0.018f - pitchAccel * 0.00045f + arcDipY * posScale);
+        armTarget.z = (arcTuckZ * posScale);
+
+        const float maxArmX = 0.095f * (1.0f - 0.65f * zoomBlend) * g_freeaim_wpn_max_angle * adsMult;
+        const float maxArmY = 0.075f * (1.0f - 0.65f * zoomBlend) * g_freeaim_wpn_max_angle * adsMult;
+        const float maxArmZ = 0.085f * (1.0f - 0.65f * zoomBlend) * g_freeaim_wpn_max_angle * adsMult;
+        clamp(armTarget.x, -maxArmX, maxArmX);
+        clamp(armTarget.y, -maxArmY, maxArmY);
+        clamp(armTarget.z, -maxArmZ, maxArmZ * 0.5f);
+
+        if (yawReversal)
+            phys.armSpring.vel.x -= yawAccel * 0.0020f * posScale;
+        if (pitchReversal)
+            phys.armSpring.vel.y -= pitchAccel * 0.0016f * posScale;
+
+        const float armOmegaAccel = (8.8f + 4.2f * zoomBlend) * g_freeaim_wpn_speed;
+        const float armZetaAccel = (0.86f + 0.08f * zoomBlend) * g_freeaim_wpn_damping;
+        const float armOmegaBrake = (10.2f + 4.8f * zoomBlend) * g_freeaim_wpn_speed;
+        const float armZetaBrake = (0.54f + 0.16f * zoomBlend) * g_freeaim_wpn_damping;
+
+        phys.armSpring.Update(armTarget, simDt, armOmegaAccel, armZetaAccel, armOmegaBrake, armZetaBrake);
+        clamp(phys.armSpring.pos.x, -maxArmX * 1.25f, maxArmX * 1.25f);
+        clamp(phys.armSpring.pos.y, -maxArmY * 1.25f, maxArmY * 1.25f);
+        clamp(phys.armSpring.pos.z, -maxArmZ * 1.25f, maxArmZ * 0.65f);
+
+        Fvector armAccel;
+        armAccel.sub(phys.armSpring.vel, phys.prevArmVel);
+        armAccel.mul(1.0f / simDt);
+        phys.prevArmVel = phys.armSpring.vel;
+
+        // 3. WRIST & BARREL spring
+        const float crossRollFromYaw = -phys.wristSpring.pos.x * 0.35f * g_freeaim_wpn_roll;
+        const float crossPitchFromYaw = -_abs(phys.wristSpring.pos.x) * 0.08f;
+
+        const float barrelYaw = (-nlYawVel * 0.056f + armAccel.x * 0.045f) * rotScale;
+        const float barrelPitch = (-nlPitchVel * 0.048f + armAccel.y * 0.040f + _abs(nlYawVel) * 0.009f) * rotScale + crossPitchFromYaw;
+        const float barrelRoll = (-nlYawVel * 0.115f - armAccel.x * 0.070f) * rotScale * g_freeaim_wpn_roll + crossRollFromYaw;
+
+        const float maxYaw = 0.42f * (1.0f - (isStrictOptic ? 0.80f : 0.55f) * zoomBlend) * g_freeaim_wpn_max_angle * adsMult;
+        const float maxPitch = 0.36f * (1.0f - (isStrictOptic ? 0.80f : 0.55f) * zoomBlend) * g_freeaim_wpn_max_angle * adsMult;
+        const float maxRoll = 0.64f * (1.0f - (isStrictOptic ? 0.80f : 0.52f) * zoomBlend) * g_freeaim_wpn_max_angle * g_freeaim_wpn_roll * adsMult;
+
+        Fvector wristTarget;
+        wristTarget.x = barrelYaw;
+        wristTarget.y = barrelPitch;
+        wristTarget.z = barrelRoll;
+        clamp(wristTarget.x, -maxYaw, maxYaw);
+        clamp(wristTarget.y, -maxPitch, maxPitch);
+        clamp(wristTarget.z, -maxRoll, maxRoll);
+
+        const float wristOmegaAccel = (13.5f + 5.5f * zoomBlend) * g_freeaim_wpn_speed;
+        const float wristZetaAccel = (0.80f + 0.10f * zoomBlend) * g_freeaim_wpn_damping;
+        const float wristOmegaBrake = (15.2f + 6.0f * zoomBlend) * g_freeaim_wpn_speed;
+        const float wristZetaBrake = (0.48f + 0.18f * zoomBlend) * g_freeaim_wpn_damping;
+
+        phys.wristSpring.Update(wristTarget, simDt, wristOmegaAccel, wristZetaAccel, wristOmegaBrake, wristZetaBrake);
+        clamp(phys.wristSpring.pos.x, -maxYaw * 1.25f, maxYaw * 1.25f);
+        clamp(phys.wristSpring.pos.y, -maxPitch * 1.25f, maxPitch * 1.25f);
+        clamp(phys.wristSpring.pos.z, -maxRoll * 1.25f, maxRoll * 1.25f);
+
+        // 4. Organic human hold micro-drift
+        const float driftAmp = (0.0014f + 0.0018f * phys.holdEnergy) * (1.0f - 0.65f * zoomBlend);
+        const float driftX = _sin(phys.timeAccum * 1.45f) * driftAmp;
+        const float driftY = _cos(phys.timeAccum * 2.15f + 0.7f) * driftAmp * 0.85f;
+        const float driftRoll = _sin(phys.timeAccum * 1.15f + 1.3f) * driftAmp * 2.4f;
+
+        // 5. Dynamic elbow/wrist pivot
+        const float sweepPull = std::min(_abs(nlYawVel) * 0.012f, 0.072f);
+        Fvector wristPivot{0.0f, -0.055f, -0.16f - sweepPull};
+        wristPivot.mul(1.0f - 0.55f * zoomBlend);
+
+        Fmatrix toWrist, wristRot, fromWrist, articulatedXForm;
+        toWrist.translate(-wristPivot.x, -wristPivot.y, -wristPivot.z);
+        wristRot.setHPB(phys.wristSpring.pos.x + driftX * 1.5f, phys.wristSpring.pos.y + driftY * 1.5f, phys.wristSpring.pos.z + driftRoll);
+        fromWrist.translate(wristPivot.x + phys.armSpring.pos.x + driftX, wristPivot.y + phys.armSpring.pos.y + driftY, wristPivot.z + phys.armSpring.pos.z);
+
+        articulatedXForm.mul(fromWrist, wristRot);
+        articulatedXForm.mulB_43(toWrist);
+        trans.mulB_43(articulatedXForm);
+
+        float pitch = angle_normalize_signed(curDir.getP()) * GetInertionFactor() * 0.45f;
         clamp(pitch, inertion_data.m_pitch_low_limit, PI);
-        origin.mad(xform.j, -pitch * inertion_data.m_pitch_offset_n);
+        trans.c.mad(trans.k, -pitch * inertion_data.m_pitch_offset_d);
+        trans.c.mad(trans.i, -pitch * inertion_data.m_pitch_offset_r);
+        trans.c.mad(trans.j, -pitch * inertion_data.m_pitch_offset_n);
+        return;
     }
+
+    // Original engine fallback when g_freeaim_enabled == 0
+    Fmatrix xform = trans;
+    Fvector& origin = trans.c;
+
+    Fvector cur_dir = Device.vCameraDirection;
+    cur_dir.normalize_safe();
+
+    Fvector diff_dir;
+    diff_dir.sub(cur_dir, inert_st_last_dir);
+
+    Fvector last;
+    last.normalize_safe(inert_st_last_dir);
+    const float dot = last.dotproduct(cur_dir);
+    if (dot < EPS)
+    {
+        Fvector v0;
+        v0.crossproduct(inert_st_last_dir, cur_dir);
+        inert_st_last_dir.crossproduct(cur_dir, v0);
+        diff_dir.sub(cur_dir, inert_st_last_dir);
+    }
+
+    float _tendto_speed, _origin_offset;
+    if (IsZoomed())
+    {
+        float factor = GetInertionFactor();
+        _tendto_speed = inertion_data.m_tendto_speed_aim - (inertion_data.m_tendto_speed_aim - inertion_data.m_tendto_speed) * factor;
+        _origin_offset = inertion_data.m_origin_offset_aim - (inertion_data.m_origin_offset_aim - inertion_data.m_origin_offset) * factor;
+        if (g_freeaim_enabled)
+            _origin_offset *= factor;
+    }
+    else
+    {
+        _tendto_speed = inertion_data.m_tendto_speed;
+        _origin_offset = inertion_data.m_origin_offset;
+    }
+
+    const float power_factor = GetInertionPowerFactor();
+    _tendto_speed *= power_factor;
+    _origin_offset *= power_factor;
+
+    inert_st_last_dir.mad(diff_dir, _tendto_speed * Device.fTimeDelta);
+    origin.mad(diff_dir, -_origin_offset);
+
+    float pitch = angle_normalize_signed(cur_dir.getP());
+    pitch *= GetInertionFactor();
+
+    origin.mad(xform.k, -pitch * inertion_data.m_pitch_offset_d);
+    origin.mad(xform.i, -pitch * inertion_data.m_pitch_offset_r);
+
+    clamp(pitch, inertion_data.m_pitch_low_limit, PI);
+    origin.mad(xform.j, -pitch * inertion_data.m_pitch_offset_n);
 }
 
 // Обновление координат текущего худа
@@ -1070,7 +1352,9 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
                 current_moving_rot.set(Fvector{});
             }
 
-            current_moving_rot.mul(-PI / 180.f); // Преобразуем углы в радианы
+            current_moving_rot.mul(-PI / 180.f); // 
+            if (g_freeaim_enabled)
+                current_moving_rot.mul(0.35f);
 
             if (!current_moving_offs.similar(current_strafe[0], EPS))
                 current_strafe[0].lerp(current_strafe[0], current_moving_offs, fStepPerUpd);
@@ -1080,6 +1364,12 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
 
             summary_offset.add(current_strafe[0]);
             summary_rotate.add(current_strafe[1]);
+
+            if (g_freeaim_enabled)
+            {
+                current_moving_offs.mul(0.20f);
+                current_moving_rot.mul(0.20f);
+            }
         }
     }
 
@@ -1445,6 +1735,9 @@ void CHudItem::CWeaponBobbing::Update(Fmatrix& m, Fmatrix& m2)
             A = m_fAmplitudeWalk * k2;
             ST = m_fSpeedWalk * fTime * k;
         }
+
+       if (g_freeaim_enabled && !ControllerCondition)
+            A *= 0.25f;
 
         float _sinA = _abs(_sin(ST) * A) * fReminderFactor;
 

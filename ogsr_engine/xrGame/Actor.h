@@ -530,6 +530,12 @@ public:
     float m_fAimCamStage2Pitch{0.f};
     float m_fAimLatchedCenterSpeed{0.f};
     void UpdateFreeAimDeadzone(float dt);
+    Fvector m_vBodycamBobPos{0.f, 0.f, 0.f};
+    Fvector m_vBodycamBobRot{0.f, 0.f, 0.f}; // x = yaw, y = pitch, z = roll (radianos)
+    float m_fBodycamStepPhase{0.f};
+    float m_fBodycamMoveWeight{0.f};
+    float m_fBodycamStrafeRoll{0.f};
+    void UpdateBodycamBobbing(float dt);
 
     //////////////////////////////////////////////////////////////////////////
     // Weapon fire control (оружие актрера)

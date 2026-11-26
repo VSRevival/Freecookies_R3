@@ -1621,6 +1621,13 @@ public:
     }
 };
 
+float g_freeaim_wpn_sway = 1.0f;
+float g_freeaim_wpn_roll = 1.0f;
+float g_freeaim_wpn_max_angle = 1.0f;
+float g_freeaim_wpn_speed = 1.0f;
+float g_freeaim_wpn_damping = 1.0f;
+float g_freeaim_wpn_ads_mult = 1.0f;
+
 void CCC_RegisterCommands()
 {
     CMD1(CCC_MemStats, "stat_memory");
@@ -1738,8 +1745,14 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "g_freeaim_ads_center", &g_freeaim_ads_center, 0.0f, 25.0f);
     CMD4(CCC_Float, "g_freeaim_inertia", &g_freeaim_inertia, 0.0f, 3.0f);
     CMD4(CCC_Float, "g_freeaim_ads_pivot_y", &g_freeaim_ads_pivot_y, -0.20f, 0.20f);
-CMD4(CCC_Float, "g_freeaim_ads_pivot_z", &g_freeaim_ads_pivot_z, -0.25f, 0.40f);
-CMD4(CCC_Float, "g_freeaim_ads_roll",    &g_freeaim_ads_roll,     0.00f, 1.00f);
+    CMD4(CCC_Float, "g_freeaim_ads_pivot_z", &g_freeaim_ads_pivot_z, -0.25f, 0.40f);
+    CMD4(CCC_Float, "g_freeaim_ads_roll",    &g_freeaim_ads_roll,     0.00f, 1.00f);
+    CMD4(CCC_Float, "g_freeaim_wpn_sway", &g_freeaim_wpn_sway, 0.0f, 4.0f);
+    CMD4(CCC_Float, "g_freeaim_wpn_roll", &g_freeaim_wpn_roll, 0.0f, 4.0f);
+    CMD4(CCC_Float, "g_freeaim_wpn_max_angle", &g_freeaim_wpn_max_angle, 0.1f, 3.0f);
+    CMD4(CCC_Float, "g_freeaim_wpn_speed", &g_freeaim_wpn_speed, 0.2f, 3.0f);
+    CMD4(CCC_Float, "g_freeaim_wpn_damping", &g_freeaim_wpn_damping, 0.2f, 2.5f);
+    CMD4(CCC_Float, "g_freeaim_wpn_ads_mult", &g_freeaim_wpn_ads_mult, 0.0f, 3.0f);
     CMD3(CCC_Mask, "hud_crosshair", &psHUD_Flags, HUD_CROSSHAIR);
     CMD3(CCC_Mask, "hud_crosshair_dist", &psHUD_Flags, HUD_CROSSHAIR_DIST);
     CMD3(CCC_Mask, "hud_info_overhead", &psHUD_Flags, HUD_INFO_OVERHEAD);

@@ -9,6 +9,7 @@
 #include "weapon.h"
 #include "../xr_3da/camerabase.h"
 
+
 ENGINE_API extern float psHUD_FOV;
 
 player_hud* g_player_hud{};
@@ -1020,8 +1021,7 @@ u32 player_hud::motion_length(const motion_params& P, const motion_descr& M, con
 
 void player_hud::update(const Fmatrix& cam_trans)
 {
-    //Костыли для правильной работы системы коллизии худа. Это всё плохо и надо будет как-то переделать в будущем. Здесь два апдейта худа подряд делаются для того, чтобы менеджер
-    //коллизи мог получить координаты ствола в обычном режиме, из которых уже будет делаться рейтрейс. skip_updated_frame тоже к этому относится.
+  
     static bool need_update_collision{};
     need_update_collision = !need_update_collision;
     bool need_update_collision_local = need_update_collision;
@@ -1086,7 +1086,7 @@ void player_hud::update(const Fmatrix& cam_trans)
         const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
         const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
 
-        if (isStrictOptic && zoomBlend >= 0.999f)
+        if (wpn && wpn->IsZoomed() && isStrictOptic)
         {
             s_visYawOff = 0.f;
             s_visPitchOff = 0.f;
@@ -1098,51 +1098,28 @@ void player_hud::update(const Fmatrix& cam_trans)
             const float dt = std::clamp(Device.fTimeDelta, 0.f, 0.05f);
             if (dt > 0.f)
             {
-                const float omega = 18.0f + 5.0f * zoomBlend;
+                const float omega = 13.5f + 4.5f * zoomBlend;
                 const float k = omega * omega;
 
-                // Yaw: smooth buildup outward, stronger braking when returning toward center, zero overshoot past target
-                const float prevErrYaw = targetYawOff - s_visYawOff;
-                const float cYaw = (s_visYawOff * s_visYawVel < 0.f) ? (2.7f * omega) : (2.0f * omega);
-                const float accelYaw = prevErrYaw * k - s_visYawVel * cYaw;
-                s_visYawVel += accelYaw * dt;
-                const float nextYaw = s_visYawOff + s_visYawVel * dt;
-                if (prevErrYaw * (targetYawOff - nextYaw) < 0.f)
-                {
-                    s_visYawOff = targetYawOff;
-                    s_visYawVel = 0.f;
-                }
-                else
-                {
-                    s_visYawOff = nextYaw;
-                }
+                auto updateFreeAimAxis = [&](float target, float& pos, float& vel) {
+                    const float err = target - pos;
+                    const bool isBraking = (err * vel < 0.f) || (_abs(target) < 0.001f && _abs(vel) > 0.002f);
+                    const float zeta = isBraking ? (0.56f + 0.20f * zoomBlend) : (0.86f + 0.08f * zoomBlend);
+                    const float c = 2.0f * zeta * omega;
 
-                // Pitch: same asymmetric damping + zero-overshoot guard
-                const float prevErrPitch = targetPitchOff - s_visPitchOff;
-                const float cPitch = (s_visPitchOff * s_visPitchVel < 0.f) ? (2.7f * omega) : (2.0f * omega);
-                const float accelPitch = prevErrPitch * k - s_visPitchVel * cPitch;
-                s_visPitchVel += accelPitch * dt;
-                const float nextPitch = s_visPitchOff + s_visPitchVel * dt;
-                if (prevErrPitch * (targetPitchOff - nextPitch) < 0.f)
-                {
-                    s_visPitchOff = targetPitchOff;
-                    s_visPitchVel = 0.f;
-                }
-                else
-                {
-                    s_visPitchOff = nextPitch;
-                }
+                    const float accel = err * k - vel * c;
+                    vel += accel * dt;
+                    pos += vel * dt;
 
-                if (_abs(targetYawOff) < 0.0001f && _abs(s_visYawOff) < 0.0001f && _abs(s_visYawVel) < 0.001f)
-                {
-                    s_visYawOff = 0.f;
-                    s_visYawVel = 0.f;
-                }
-                if (_abs(targetPitchOff) < 0.0001f && _abs(s_visPitchOff) < 0.0001f && _abs(s_visPitchVel) < 0.001f)
-                {
-                    s_visPitchOff = 0.f;
-                    s_visPitchVel = 0.f;
-                }
+                    if (_abs(target) < 0.0001f && _abs(pos) < 0.0001f && _abs(vel) < 0.001f)
+                    {
+                        pos = 0.f;
+                        vel = 0.f;
+                    }
+                };
+
+                updateFreeAimAxis(targetYawOff, s_visYawOff, s_visYawVel);
+                updateFreeAimAxis(targetPitchOff, s_visPitchOff, s_visPitchVel);
             }
         }
     }
@@ -1170,6 +1147,35 @@ void player_hud::update(const Fmatrix& cam_trans)
     Fvector m2pos = attach_pos(1);
     Fvector m2rot = attach_rot(1);
 
+    if (g_freeaim_enabled && script_anim_part == static_cast<u8>(-1))
+    {
+        CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
+        const bool is3dss = wpn && wpn->Is3dssEnabled();
+        const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
+        const float hipWeight = (1.0f - zoomBlend) * (1.0f - zoomBlend);
+
+        // No ADS, X, Y e rotações precisam zerar para a mira ficar alinhada no centro,
+        // mas o Z pode continuar positivo para manter a arma afastada da câmera.
+        const float hipZ = 0.072f;
+        const float adsZ = is3dss ? 0.015f : 0.055f; // ajuste 0.055f para mais longe/perto no ADS
+        const float currentZ = hipZ + (adsZ - hipZ) * zoomBlend;
+
+        const Fvector bodycamPos{-0.042f * hipWeight, -0.045f * hipWeight, currentZ};
+
+        const Fvector bodycamRot{-1.8f * hipWeight, 2.2f * hipWeight, 3.5f * hipWeight};
+
+        if (m_attached_items[0])
+        {
+            m1pos.add(bodycamPos);
+            m1rot.add(bodycamRot);
+            if (!m_attached_items[1])
+            {
+                m2pos.add(bodycamPos);
+                m2rot.add(bodycamRot);
+            }
+        }
+    }
+
     if (pActor && pActor->freelook_cam_control > 0.f && sub_z < 0.f && (m_attached_items[0] || m_attached_items[1]))
     {
         const float z_factor = sub_z * pActor->freelook_cam_control;
@@ -1183,6 +1189,65 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
     Fmatrix trans_2 = trans;
+
+    if (pActor && (!fis_zero(s_visYawOff) || !fis_zero(s_visPitchOff)))
+    {
+        CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
+        const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
+
+        const float yawOff = s_visYawOff;
+        const float pitchOff = s_visPitchOff;
+
+        extern int g_freeaim_ads_align_cam;
+        const float adsPivotZ = (g_freeaim_ads_align_cam != 0) ? std::clamp(g_freeaim_ads_pivot_z, 0.0f, 0.22f) : 0.0f;
+        const Fvector hipPivot{0.038f, -0.124f, -0.068f};
+        const Fvector adsPivot{0.00f, g_freeaim_ads_pivot_y, adsPivotZ};
+        Fvector activePivot;
+        activePivot.lerp(hipPivot, adsPivot, zoomBlend);
+
+        const float rollScale = g_freeaim_roll + (g_freeaim_ads_roll - g_freeaim_roll) * zoomBlend;
+        const float rollOff = -yawOff * rollScale;
+
+        Fmatrix toPivot, rot, fromPivot, freeAimXForm;
+        toPivot.translate(-activePivot.x, -activePivot.y, -activePivot.z);
+        rot.setHPB(-yawOff, -pitchOff, rollOff);
+        fromPivot.translate(activePivot.x, activePivot.y, activePivot.z);
+
+        freeAimXForm.mul(fromPivot, rot);
+        freeAimXForm.mulB_43(toPivot);
+
+        trans.mulB_43(freeAimXForm);
+        trans_2.mulB_43(freeAimXForm);
+    }
+
+    if (pActor && g_freeaim_enabled)
+    {
+        CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
+        const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
+        const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
+        
+        // Braços absorvem 50% do movimento da câmera no hipfire e 60%-65% no ADS
+        const float stabFactor = isStrictOptic ? (0.50f + 0.15f * zoomBlend) : (0.50f + 0.10f * zoomBlend);
+
+        const Fvector& bobPos = pActor->m_vBodycamBobPos;
+        const Fvector& bobRot = pActor->m_vBodycamBobRot;
+
+        if (!fis_zero(bobPos.x) || !fis_zero(bobPos.y) || !fis_zero(bobPos.z) || !fis_zero(bobRot.x) || !fis_zero(bobRot.y) || !fis_zero(bobRot.z))
+        {
+            auto applyArmStabilization = [&](Fmatrix& targetTrans) {
+                targetTrans.c.mad(targetTrans.i, -bobPos.x * stabFactor);
+                targetTrans.c.mad(targetTrans.j, -bobPos.y * stabFactor);
+                targetTrans.c.mad(targetTrans.k, -bobPos.z * stabFactor);
+
+                Fmatrix counterRot;
+                counterRot.setHPB(bobRot.x * stabFactor, bobRot.y * stabFactor, -bobRot.z * stabFactor);
+                targetTrans.mulB_43(counterRot);
+            };
+
+            applyArmStabilization(trans);
+            applyArmStabilization(trans_2);
+        }
+    }
 
     if (m_attached_items[0])
         m_attached_items[0]->m_parent_hud_item->UpdateHudAdditional(trans, need_update_collision_local);
@@ -1247,36 +1312,6 @@ void player_hud::update(const Fmatrix& cam_trans)
         }
     }
 
-    if (pActor && (!fis_zero(s_visYawOff) || !fis_zero(s_visPitchOff)))
-    {
-        CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
-        const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
-
-        const float yawOff = s_visYawOff;
-        const float pitchOff = s_visPitchOff;
-
-        extern int g_freeaim_ads_align_cam;
-        const float adsPivotZ = (g_freeaim_ads_align_cam != 0) ? std::clamp(g_freeaim_ads_pivot_z, 0.0f, 0.22f) : 0.0f;
-        const Fvector hipPivot{0.08f, -0.11f, -0.14f};
-        const Fvector adsPivot{0.00f, g_freeaim_ads_pivot_y, adsPivotZ};
-        Fvector activePivot;
-        activePivot.lerp(hipPivot, adsPivot, zoomBlend);
-
-        const float rollScale = g_freeaim_roll + (g_freeaim_ads_roll - g_freeaim_roll) * zoomBlend;
-        const float rollOff = -yawOff * rollScale;
-
-        Fmatrix toPivot, rot, fromPivot, freeAimXForm;
-        toPivot.translate(-activePivot.x, -activePivot.y, -activePivot.z);
-        rot.setHPB(-yawOff, -pitchOff, rollOff);
-        fromPivot.translate(activePivot.x, activePivot.y, activePivot.z);
-
-        freeAimXForm.mul(fromPivot, rot);
-        freeAimXForm.mulB_43(toPivot);
-
-        trans.mulB_43(freeAimXForm);
-        trans_2.mulB_43(freeAimXForm);
-    }
-
     m_transform.mul(trans, m_attach_offset);
     m_transform_2.mul(trans_2, m_attach_offset_2);
 
@@ -1295,8 +1330,9 @@ void player_hud::update(const Fmatrix& cam_trans)
     if (pActor && (_abs(pActor->m_fAimRollOffset) > 0.0001f || (_abs(pActor->m_fAimSwingActivity) > 0.001f && !fis_zero(g_freeaim_inertia))))
     {
         CWeapon* wpn = m_attached_items[0] ? smart_cast<CWeapon*>(m_attached_items[0]->m_parent_hud_item) : nullptr;
+        const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
         const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
-        const float inertiaWeight = std::max(0.0f, 1.0f - zoomBlend * 2.5f);
+        const float inertiaWeight = isStrictOptic ? std::max(0.0f, 1.0f - zoomBlend * 2.5f) : (1.0f - 0.62f * zoomBlend);
         if (inertiaWeight > 0.001f)
         {
             const float rollOff = pActor->m_fAimRollOffset * inertiaWeight;

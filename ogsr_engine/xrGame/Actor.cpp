@@ -913,6 +913,7 @@ void CActor::UpdateCL()
 
     if (IsFocused())
     {
+        UpdateBodycamBobbing(Device.fTimeDelta);
         UpdateFreeAimDeadzone(Device.fTimeDelta);
         trans.c.sub(Device.vCameraPosition);
         g_player_hud->update(trans);
@@ -1913,6 +1914,113 @@ void CActor::ShowDetector()
     if (auto det = smart_cast<CCustomDetector*>(inventory().ItemFromSlot(DETECTOR_SLOT)))
         det->ShowDetector(true);
 }
+void CActor::UpdateBodycamBobbing(float dt)
+{
+    if (!g_freeaim_enabled || cam_active != eacFirstEye || m_holder)
+    {
+        m_vBodycamBobPos.set(0.f, 0.f, 0.f);
+        m_vBodycamBobRot.set(0.f, 0.f, 0.f);
+        m_fBodycamMoveWeight = 0.f;
+        m_fBodycamStrafeRoll = 0.f;
+        return;
+    }
+
+    const float safeDt = std::clamp(dt, 0.f, 0.05f);
+    if (safeDt <= 0.f)
+        return;
+
+    CWeapon* wpn = smart_cast<CWeapon*>(inventory().ActiveItem());
+    const bool isStrictOptic = wpn && (wpn->Is3dssEnabled() || wpn->UseScopeTexture());
+    const float zoomBlend = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.f, 1.f) : 0.f;
+
+    // Atenua o balanço da câmera no ADS para manter visada limpa (principalmente em lunetas 2D/3D)
+    const float targetZoomScale = isStrictOptic ? 0.22f : 0.45f;
+    const float zoomCamScale = 1.0f - (1.0f - targetZoomScale) * zoomBlend;
+
+    const bool onGround = !(mstate_real & (mcJump | mcFall | mcClimb));
+    const bool isMoving = onGround && ((mstate_real & mcAnyMove) != 0);
+    const bool isSprinting = isMoving && ((mstate_real & mcSprint) != 0);
+    const bool isCrouched = (mstate_real & mcCrouch) != 0;
+    const bool isSlowWalk = isMoving && !isSprinting && !isActorAccelerated(mstate_real, IsZoomAimingMode());
+    const bool isLimping = conditions().IsLimping();
+
+    const float targetMoveWeight = isMoving ? 1.0f : 0.0f;
+    const float weightRate = isMoving ? 10.0f : 7.5f;
+    m_fBodycamMoveWeight += (targetMoveWeight - m_fBodycamMoveWeight) * std::clamp(1.f - expf(-weightRate * safeDt), 0.f, 1.f);
+    if (m_fBodycamMoveWeight < 0.0005f && !isMoving)
+        m_fBodycamMoveWeight = 0.f;
+
+    // Frequência de passada (1 ciclo completo = passo esquerdo + passo direito)
+    float stepFreq = 5.6f; // rad/s (~1.8 passos/seg)
+    float ampScale = 1.0f;
+    if (isSprinting)
+    {
+        stepFreq = 8.4f;
+        ampScale = 1.55f;
+    }
+    else if (isLimping)
+    {
+        stepFreq = 4.4f;
+        ampScale = 1.35f;
+    }
+    else if (isCrouched)
+    {
+        stepFreq = 4.1f;
+        ampScale = 0.68f;
+    }
+    else if (isSlowWalk)
+    {
+        stepFreq = 4.3f;
+        ampScale = 0.72f;
+    }
+
+    if (m_fBodycamMoveWeight > 0.001f)
+    {
+        m_fBodycamStepPhase += stepFreq * safeDt;
+        if (m_fBodycamStepPhase > PI_MUL_2)
+            m_fBodycamStepPhase -= PI_MUL_2;
+    }
+    else
+    {
+        // Retorna suavemente para fase neutra ao parar
+        m_fBodycamStepPhase *= expf(-8.0f * safeDt);
+    }
+
+    // Roll dedicado ao strafe (lente presa no colete inclina lateralmente ao deslocar)
+    float targetStrafeRoll = 0.f;
+    const bool strafing = onGround && ((mstate_real & (mcLStrafe | mcRStrafe)) != 0);
+    if (mstate_real & mcLStrafe)
+        targetStrafeRoll += deg2rad(1.85f);
+    if (mstate_real & mcRStrafe)
+        targetStrafeRoll -= deg2rad(1.85f);
+
+    targetStrafeRoll *= (isCrouched ? 0.65f : 1.0f) * zoomCamScale;
+    m_fBodycamStrafeRoll += (targetStrafeRoll - m_fBodycamStrafeRoll) * std::clamp(1.f - expf(-10.5f * safeDt), 0.f, 1.f);
+    if (_abs(m_fBodycamStrafeRoll) < 0.00005f && fis_zero(targetStrafeRoll))
+        m_fBodycamStrafeRoll = 0.f;
+
+    // Forma de onda de passo com impacto seco na pisada (micro-tranco vertical) + rebote
+    const float w = m_fBodycamMoveWeight * ampScale * zoomCamScale;
+    const float strideSin = sinf(m_fBodycamStepPhase);
+    const float heelStrike = 1.0f - powf(_abs(strideSin), 0.65f); // pico agudo a cada passo
+    const float verticalJolt = (0.42f - heelStrike) * 0.022f * w; // queda seca na pisada, elevação no impulso
+    const float lateralSway = strideSin * 0.0085f * w;
+    const float forwardPulse = (heelStrike - 0.45f) * 0.006f * w;
+
+    // Micro-respiração sutil quando parado para a câmera nunca parecer um tripé estático
+    const float idleWeight = (1.0f - m_fBodycamMoveWeight) * zoomCamScale;
+    const float breathT = Device.fTimeGlobal * 1.9f;
+    const float breathY = sinf(breathT) * 0.0016f * idleWeight;
+    const float breathPitch = cosf(breathT) * deg2rad(0.12f) * idleWeight;
+
+    const float strafeStepBoost = strafing ? 1.35f : 1.0f;
+    const float stepRoll = -strideSin * deg2rad(1.20f) * w * strafeStepBoost;
+    const float stepYaw = strideSin * deg2rad(0.45f) * w;
+    const float stepPitch = (heelStrike - 0.45f) * deg2rad(0.80f) * w;
+
+    m_vBodycamBobPos.set(lateralSway, verticalJolt + breathY, forwardPulse);
+    m_vBodycamBobRot.set(stepYaw, stepPitch + breathPitch, stepRoll + m_fBodycamStrafeRoll);
+}
 void CActor::UpdateFreeAimDeadzone(float dt)
 {
     extern float g_freeaim_cam_smooth;
@@ -1923,7 +2031,8 @@ void CActor::UpdateFreeAimDeadzone(float dt)
 
     const float zoomFactor = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.0f, 1.0f) : 0.0f;
     const bool is3dssOptic = wpn && wpn->Is3dssEnabled();
-    const bool opticLocked = is3dssOptic && (zoomFactor >= 0.999f);
+    const bool isStrictOptic = wpn && (is3dssOptic || wpn->UseScopeTexture());
+    const bool opticLocked = wpn && wpn->IsZoomed() && isStrictOptic;
 
     const bool active =
         wpn && wpn->IsFreeAimAllowed() && !opticLocked && (cam_active == eacFirstEye) && (cam_freelook == eflDisabled) && !(mstate_real & mcSprint) && !WeaponLowered();
@@ -1971,8 +2080,7 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
         else
         {
-            const bool strictOpticAim = wpn && wpn->IsZoomed() && is3dssOptic;
-            const float recenterSpeed = strictOpticAim ? 18.0f : 10.0f;
+            const float recenterSpeed = 14.0f;
             const float alpha = std::clamp(1.f - expf(-recenterSpeed * safeDt), 0.f, 1.f);
 
             m_fAimYawOffset += (0.f - m_fAimYawOffset) * alpha;
@@ -1993,33 +2101,26 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         return;
     }
 
-    // 2-stage cascaded chain-of-movement camera delay with 100% turn conservation
+    // Filtro direto de 1 estágio (sem atraso duplo em cascata)
     if (firstEye && safeDt > 0.f && (!fis_zero(m_fAimPendingCamYaw) || !fis_zero(m_fAimPendingCamPitch) || !fis_zero(m_fAimCamStage2Yaw) || !fis_zero(m_fAimCamStage2Pitch)))
     {
-        const float stageRate = std::max(g_freeaim_cam_smooth * 0.55f, 2.5f);
-        const float stageAlpha = std::clamp(1.f - expf(-stageRate * safeDt), 0.f, 1.f);
+        m_fAimPendingCamYaw += m_fAimCamStage2Yaw;
+        m_fAimPendingCamPitch += m_fAimCamStage2Pitch;
+        m_fAimCamStage2Yaw = 0.f;
+        m_fAimCamStage2Pitch = 0.f;
 
-        const float transferYaw = m_fAimPendingCamYaw * stageAlpha;
-        const float transferPitch = m_fAimPendingCamPitch * stageAlpha;
-        m_fAimPendingCamYaw -= transferYaw;
-        m_fAimPendingCamPitch -= transferPitch;
+        const float smoothRate = std::max(g_freeaim_cam_smooth, 6.0f);
+        const float smoothAlpha = std::clamp(1.f - expf(-smoothRate * safeDt), 0.f, 1.f);
 
-        m_fAimCamStage2Yaw += transferYaw;
-        m_fAimCamStage2Pitch += transferPitch;
-
-        const float stepYaw = m_fAimCamStage2Yaw * stageAlpha;
-        const float stepPitch = m_fAimCamStage2Pitch * stageAlpha;
-        m_fAimCamStage2Yaw -= stepYaw;
-        m_fAimCamStage2Pitch -= stepPitch;
+        const float stepYaw = m_fAimPendingCamYaw * smoothAlpha;
+        const float stepPitch = m_fAimPendingCamPitch * smoothAlpha;
+        m_fAimPendingCamYaw -= stepYaw;
+        m_fAimPendingCamPitch -= stepPitch;
 
         if (_abs(m_fAimPendingCamYaw) < 0.00001f)
             m_fAimPendingCamYaw = 0.f;
         if (_abs(m_fAimPendingCamPitch) < 0.00001f)
             m_fAimPendingCamPitch = 0.f;
-        if (_abs(m_fAimCamStage2Yaw) < 0.00001f)
-            m_fAimCamStage2Yaw = 0.f;
-        if (_abs(m_fAimCamStage2Pitch) < 0.00001f)
-            m_fAimCamStage2Pitch = 0.f;
 
         if (!fis_zero(stepYaw))
             firstEye->Move((stepYaw < 0.f) ? kLEFT : kRIGHT, _abs(stepYaw));
@@ -2037,31 +2138,15 @@ void CActor::UpdateFreeAimDeadzone(float dt)
 
     m_fAimLatchedCenterSpeed = 0.f;
 
-    // Alinhamento unificado de Hipfire e ADS (g_freeaim_ads_align_cam = 1 ativa, 0 desativa)
+    // Alinhamento exponencial proporcional à distância angular (sem arrasto lento)
     if (safeDt > 0.f)
     {
         const float prevYaw = m_fAimYawOffset;
         const float prevPitch = m_fAimPitchOffset;
 
-        if (wpn->IsZoomed() && is3dssOptic)
+        if (g_freeaim_ads_align_cam != 0)
         {
-            const float centerAlpha = std::clamp(1.f - expf(-18.0f * safeDt), 0.f, 1.f);
-            m_fAimYawOffset += (0.f - m_fAimYawOffset) * centerAlpha;
-            m_fAimPitchOffset += (0.f - m_fAimPitchOffset) * centerAlpha;
-
-            if (firstEye && g_freeaim_ads_align_cam != 0)
-            {
-                const float camDeltaYaw = prevYaw - m_fAimYawOffset;
-                const float camDeltaPitch = prevPitch - m_fAimPitchOffset;
-                if (!fis_zero(camDeltaYaw))
-                    firstEye->Move((camDeltaYaw < 0.f) ? kLEFT : kRIGHT, _abs(camDeltaYaw));
-                if (!fis_zero(camDeltaPitch))
-                    firstEye->Move((camDeltaPitch > 0.f) ? kUP : kDOWN, _abs(camDeltaPitch));
-            }
-        }
-        else if (g_freeaim_ads_align_cam != 0)
-        {
-            const float clampAlpha = std::clamp(1.f - expf(-18.0f * safeDt), 0.f, 1.f);
+            const float clampAlpha = std::clamp(1.f - expf(-22.0f * safeDt), 0.f, 1.f);
 
             if (m_fAimYawOffset > maxAngles.x)
                 m_fAimYawOffset += (maxAngles.x - m_fAimYawOffset) * clampAlpha;
@@ -2072,25 +2157,12 @@ void CActor::UpdateFreeAimDeadzone(float dt)
                 m_fAimPitchOffset += (maxAngles.y - m_fAimPitchOffset) * clampAlpha;
             else if (m_fAimPitchOffset < -maxAngles.y)
                 m_fAimPitchOffset += (-maxAngles.y - m_fAimPitchOffset) * clampAlpha;
-
-            if (!fis_zero(m_fAimYawOffset) || !fis_zero(m_fAimPitchOffset))
+            if (wpn && wpn->IsZoomed())
             {
-                const float effectiveCenterSpeed = (g_freeaim_ads_center > 0.f) ? g_freeaim_ads_center : 14.0f;
-                const float dist = _sqrt(m_fAimYawOffset * m_fAimYawOffset + m_fAimPitchOffset * m_fAimPitchOffset);
-                const float angularRate = (effectiveCenterSpeed * 1.25f) * 0.022f;
-                const float step = angularRate * safeDt;
-
-                if (dist <= step)
-                {
-                    m_fAimYawOffset = 0.f;
-                    m_fAimPitchOffset = 0.f;
-                }
-                else
-                {
-                    const float scale = (dist - step) / dist;
-                    m_fAimYawOffset *= scale;
-                    m_fAimPitchOffset *= scale;
-                }
+                const float alignRate = (g_freeaim_ads_center > 0.f) ? g_freeaim_ads_center : 4.5f;
+                const float alignAlpha = std::clamp(1.f - expf(-alignRate * safeDt), 0.f, 1.f);
+                m_fAimYawOffset += (0.f - m_fAimYawOffset) * alignAlpha;
+                m_fAimPitchOffset += (0.f - m_fAimPitchOffset) * alignAlpha;
             }
 
             if (firstEye)
@@ -2105,7 +2177,7 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
         else
         {
-            const float boundAlpha = std::clamp(1.f - expf(-14.0f * safeDt), 0.f, 1.f);
+            const float boundAlpha = std::clamp(1.f - expf(-16.0f * safeDt), 0.f, 1.f);
 
             if (m_fAimYawOffset > maxAngles.x)
                 m_fAimYawOffset += (maxAngles.x - m_fAimYawOffset) * boundAlpha;
@@ -2124,7 +2196,7 @@ void CActor::UpdateFreeAimDeadzone(float dt)
             m_fAimPitchOffset = 0.f;
     }
 
-    // Critically damped wrist-cant follower
+    // Critically damped wrist-cant follower (apenas na arma, não na câmera)
     if (fis_zero(g_freeaim_roll))
     {
         m_fAimRollOffset = 0.f;
@@ -2152,7 +2224,6 @@ void CActor::UpdateFreeAimDeadzone(float dt)
         }
     }
 
-    // Continuous multi-zone edge acceleration when holding aim near the outer deadzone boundary
     if (firstEye && g_freeaim_edge_turn_speed > 0.f && safeDt > 0.f && (!is3dssOptic || zoomFactor <= 0.01f) && maxAngles.x > 0.001f && maxAngles.y > 0.001f)
     {
         const float normYaw = m_fAimYawOffset / maxAngles.x;

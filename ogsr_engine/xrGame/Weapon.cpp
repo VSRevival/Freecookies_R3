@@ -1796,6 +1796,13 @@ bool CWeapon::SwitchSightMode()
     }
 
     return true;
+
+    if (Is3dssEnabled() || UseScopeTexture())
+        AllowHudInertion(FALSE);
+    else if (IsScopeAttached() && !IsGrenadeMode() && !IsAltSightMode())
+        AllowHudInertion(m_bScopeZoomInertionAllow ? TRUE : FALSE);
+    else
+        AllowHudInertion(m_bZoomInertionAllow ? TRUE : FALSE);
 }
 
 float CWeapon::CurrentZoomFactor()
@@ -1844,8 +1851,8 @@ bool CWeapon::IsFreeAimAllowed() const
     if (IsGrenadeMode())
         return false;
 
-    // Magnified 3D/2D optics lock to the eye once zoom completes; iron sights, reflex/holo sights, and alt/canted sights retain free-aim.
-    if (IsZoomed() && (m_fZoomRotationFactor >= 1.0f) && (const_cast<CWeapon*>(this)->Is3dssEnabled() || const_cast<CWeapon*>(this)->UseScopeTexture()))
+    // Miras magnificadas 3D/2D travam no eixo óptico ao mirar; canted/alt sights mantêm free-aim.
+    if (IsZoomed() && (const_cast<CWeapon*>(this)->Is3dssEnabled() || const_cast<CWeapon*>(this)->UseScopeTexture()))
         return false;
 
     return true;
@@ -1950,6 +1957,16 @@ void CWeapon::OnZoomIn()
     }
 
     g_player_hud->updateMovementLayerState();
+
+    if (Is3dssEnabled() || UseScopeTexture())
+        AllowHudInertion(FALSE);
+    else if (IsScopeAttached() && !IsGrenadeMode() && !IsAltSightMode())
+    {
+        if (!m_bScopeZoomInertionAllow)
+            AllowHudInertion(FALSE);
+    }
+    else if (!m_bZoomInertionAllow)
+        AllowHudInertion(FALSE);
 }
 
 void CWeapon::OnZoomOut()
@@ -2259,20 +2276,6 @@ void CWeapon::OnDrawUI()
     {
         if (UseScopeTexture() && m_UIScope)
         {
-            if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
-            {
-                const float fovDeg = std::clamp(Device.fFOV, 5.0f, 120.0f);
-                const float tanHalfFovY = tanf(deg2rad(fovDeg) * 0.5f);
-                const float aspect = float(Device.dwWidth) / float(std::max(Device.dwHeight, 1u));
-                const float tanHalfFovX = tanHalfFovY * aspect;
-
-                const float uvX = (-tanf(pActor->m_fAimYawOffset) / std::max(tanHalfFovX, 0.001f)) * 0.5f;
-                const float uvY = (-tanf(pActor->m_fAimPitchOffset) / std::max(tanHalfFovY, 0.001f)) * 0.5f;
-
-                s_freeaim_scope_offset_x = std::clamp(uvX, -0.14f, 0.14f);
-                s_freeaim_scope_offset_y = std::clamp(uvY, -0.14f, 0.14f);
-            }
-
             m_UIScope->Update();
             m_UIScope->Draw();
         }

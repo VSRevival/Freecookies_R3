@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "CameraFirstEye.h"
+#include "Actor.h"
 #include "xr_level_controller.h"
 #include "..\xr_3da\xr_object.h"
 
@@ -25,13 +26,18 @@ void CCameraFirstEye::ResetFreeAimCamera()
     m_fTargetFreeAimRoll = 0.f;
 }
 
-void CCameraFirstEye::Update(Fvector& point, Fvector& noise_dangle)
+ void CCameraFirstEye::Update(Fvector& point, Fvector& noise_dangle)
 {
     const float dt = Device.fTimeDelta;
     const float rollAlpha = std::clamp(1.f - expf(-12.0f * dt), 0.f, 1.f);
     m_fFreeAimRoll += (m_fTargetFreeAimRoll - m_fFreeAimRoll) * rollAlpha;
     if (_abs(m_fFreeAimRoll) < 0.00001f && fis_zero(m_fTargetFreeAimRoll))
         m_fFreeAimRoll = 0.f;
+
+    CActor* pActor = smart_cast<CActor*>(parent);
+    const bool useBodycamBob = (pActor != nullptr) && (g_freeaim_enabled != 0);
+    const Fvector bobPos = useBodycamBob ? pActor->m_vBodycamBobPos : Fvector{0.f, 0.f, 0.f};
+    const Fvector bobRot = useBodycamBob ? pActor->m_vBodycamBobRot : Fvector{0.f, 0.f, 0.f};
 
     Fmatrix mR, R;
     Fmatrix rX, rY, rZ;
@@ -43,7 +49,7 @@ void CCameraFirstEye::Update(Fvector& point, Fvector& noise_dangle)
 
     mR.identity();
     Fquaternion Q;
-    Q.rotationYawPitchRoll(roll + m_fFreeAimRoll, yaw, pitch);
+    Q.rotationYawPitchRoll(roll + m_fFreeAimRoll + bobRot.z, yaw + bobRot.x, pitch + bobRot.y);
     mR.rotation(Q);
     mR.transpose();
     mR.mulB_43(R);
@@ -57,7 +63,17 @@ void CCameraFirstEye::Update(Fvector& point, Fvector& noise_dangle)
         parent->XFORM().transform_dir(vNormal);
     }
 
-    vPosition.set(point);
+    Fvector camPos = point;
+    if (useBodycamBob)
+    {
+        Fvector camRight;
+        camRight.crossproduct(vNormal, vDirection);
+        camPos.mad(camRight, bobPos.x);
+        camPos.mad(vNormal, bobPos.y);
+        camPos.mad(vDirection, bobPos.z);
+    }
+
+    vPosition.set(camPos);
 }
 
 void CCameraFirstEye::Move(int cmd, float val, float factor)

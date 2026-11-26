@@ -453,6 +453,7 @@ void CActor::IR_OnKeyboardHold(int cmd)
     }
 }
 
+// Em ActorInput.cpp (linhas ~350-369):
 int g_freeaim_enabled = 1;
 int g_freeaim_ads_align_cam = 1;
 float g_freeaim_hip_yaw = 11.5f;
@@ -462,15 +463,15 @@ float g_freeaim_ads_pitch = 3.5f;
 float g_freeaim_hip_sens = 0.40f;
 float g_freeaim_ads_sens = 0.28f;
 float g_freeaim_roll = 0.22f;
-float g_freeaim_cam_roll = 0.12f;
-float g_freeaim_cam_smooth = 28.0f;
+float g_freeaim_cam_roll = 0.07f; // Zerado para não inclinar o horizonte e causar vertigem
+float g_freeaim_cam_smooth = 14.0f; // Resposta rápida sem arrasto pós-movimento
 float g_freeaim_z1_end = 0.00f;
-float g_freeaim_z2_follow = 0.18f;
+float g_freeaim_z2_follow = 0.18f; // Câmera acompanha imediatamente desde o centro
 float g_freeaim_z3_follow = 0.50f;
 float g_freeaim_z4_follow = 0.85f;
 float g_freeaim_edge_turn_speed = 0.0f;
 float g_freeaim_shot_kick = 0.35f;
-float g_freeaim_ads_center = 7.5f;
+float g_freeaim_ads_center = 11.0f; // Alinhamento firme sem lentidão
 float g_freeaim_inertia = 1.35f;
 float g_freeaim_ads_pivot_y = 0.00f;
 float g_freeaim_ads_pivot_z = 0.0f;
@@ -546,7 +547,8 @@ void CActor::IR_OnMouseMove(int dx, int dy)
     CWeapon* wpn = smart_cast<CWeapon*>(iitem);
     const float zoomFactor = wpn ? std::clamp(wpn->GetZRotatingFactor(), 0.0f, 1.0f) : 0.0f;
     const bool is3dssOptic = wpn && wpn->Is3dssEnabled();
-    const bool opticLocked = is3dssOptic && (zoomFactor >= 1.0f);
+    const bool isStrictOptic = wpn && (is3dssOptic || wpn->UseScopeTexture());
+    const bool opticLocked = wpn && wpn->IsZoomed() && isStrictOptic;
 
     const bool allowDeadzone =
         wpn && wpn->IsFreeAimAllowed() && !opticLocked && (cam_active == eacFirstEye) && (cam_freelook == eflDisabled) && !(mstate_real & mcSprint) && !WeaponLowered();
